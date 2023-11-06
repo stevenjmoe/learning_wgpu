@@ -1,7 +1,8 @@
 use simple_logger::SimpleLogger;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{ElementState, Event, KeyEvent, WindowEvent},
     event_loop::EventLoop,
+    keyboard::{Key, NamedKey},
     window::{Window, WindowBuilder},
 };
 
@@ -157,6 +158,17 @@ pub async fn run() -> Result<(), impl std::error::Error> {
                 if !state.input(event) {
                     match event {
                         WindowEvent::CloseRequested => elwt.exit(),
+                        WindowEvent::KeyboardInput {
+                            event:
+                                KeyEvent {
+                                    state: ElementState::Pressed,
+                                    logical_key: Key::Named(NamedKey::Escape),
+                                    ..
+                                },
+                            ..
+                        } => {
+                            elwt.exit();
+                        }
                         WindowEvent::RedrawRequested => {
                             state.update();
                             match state.render() {
@@ -166,17 +178,17 @@ pub async fn run() -> Result<(), impl std::error::Error> {
                                 Err(e) => eprintln!("{:?}", e),
                             }
                             state.window.pre_present_notify();
-                        },
+                        }
                         WindowEvent::Resized(physical_size) => {
                             state.resize(*physical_size);
-                        },
+                        }
                         _ => (),
                     }
                 }
-            },
+            }
             Event::AboutToWait => {
                 state.window.request_redraw();
-            },
+            }
             _ => (),
         }
     })
