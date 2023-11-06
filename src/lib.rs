@@ -1,9 +1,10 @@
 use simple_logger::SimpleLogger;
 use winit::{
+    dpi::PhysicalSize,
     event::{ElementState, Event, KeyEvent, WindowEvent},
     event_loop::EventLoop,
     keyboard::{Key, NamedKey},
-    window::{Window, WindowBuilder},
+    window::{Fullscreen, Window, WindowBuilder},
 };
 
 struct State {
@@ -12,6 +13,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
+    clear_colour: wgpu::Color,
     window: Window,
 }
 
@@ -64,7 +66,10 @@ impl State {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
+
         surface.configure(&device, &config);
+
+        let clear_colour = wgpu::Color::BLACK;
 
         Self {
             window,
@@ -73,6 +78,7 @@ impl State {
             queue,
             config,
             size,
+            clear_colour,
         }
     }
 
@@ -86,11 +92,24 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+
+            println!("{:?}", new_size);
         }
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.clear_colour = wgpu::Color {
+                    r: position.x,
+                    g: position.y,
+                    a: 1.0,
+                    b: 1.0,
+                };
+                true
+            }
+            _ => false,
+        }
     }
 
     fn update(&mut self) {}
@@ -113,12 +132,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_colour),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -136,14 +150,32 @@ impl State {
 
 pub async fn run() -> Result<(), impl std::error::Error> {
     SimpleLogger::new().init().unwrap();
-
     let event_loop = EventLoop::new().unwrap();
+
+    let mut decorations = true;
+    let mut minimized = false;
+    let mut maximized = false;
+    let mut with_min_size = false;
+    let mut with_max_size = false;
 
     let window = WindowBuilder::new()
         .with_title("Window!")
         .with_inner_size(winit::dpi::LogicalSize::new(128.0, 128.0))
         .build(&event_loop)
         .unwrap();
+
+    let mut monitor = event_loop
+        .available_monitors()
+        .next()
+        .expect("No monitor found!");
+    println!("Monitor: {:?}", monitor.name());
+
+    let mut mode_index = 0;
+    let mut mode = monitor
+        .video_modes()
+        .next()
+        .expect("No fullscreen mode found");
+    println!("Mode: {mode}");
 
     let mut state = State::new(window).await;
 
@@ -158,17 +190,90 @@ pub async fn run() -> Result<(), impl std::error::Error> {
                 if !state.input(event) {
                     match event {
                         WindowEvent::CloseRequested => elwt.exit(),
+
                         WindowEvent::KeyboardInput {
                             event:
                                 KeyEvent {
                                     state: ElementState::Pressed,
-                                    logical_key: Key::Named(NamedKey::Escape),
+                                    logical_key: key,
                                     ..
                                 },
                             ..
-                        } => {
-                            elwt.exit();
-                        }
+                        } => match key {
+                            Key::Named(NamedKey::Escape) => elwt.exit(),
+                            Key::Character(ch) => match ch.to_lowercase().as_str() {
+                                "f" | "b" if state.window.fullscreen().is_some() => {
+                                    state.window.set_fullscreen(None);
+                                }
+                                "f" => {
+                                    let fullscreen = Some(Fullscreen::Exclusive(mode.clone()));
+                                    println!("Setting mode: {fullscreen:?}");
+                                    state.window.set_fullscreen(fullscreen);
+                                }
+                                "b" => {
+                                    let fullscreen =
+                                        Some(Fullscreen::Borderless(Some(monitor.clone())));
+                                    println!("Setting mode: {fullscreen:?}");
+                                    state.window.set_fullscreen(fullscreen);
+                                }
+                                "m" => {
+                                    mode_index += 1;
+                                    if let Some(m) = monitor.video_modes().nth(mode_index) {
+                                        mode = m;
+                                    } else {
+                                        mode_index = 0;
+                                        mode = monitor
+                                            .video_modes()
+                                            .next()
+                                            .expect("No fullscreen mode found");
+                                    }
+                                    println!("Mode: {mode}");
+                                }
+                                "d" => {
+                                    decorations = !decorations;
+                                    state.window.set_decorations(decorations);
+                                }
+                                "x" => {
+                                    maximized = !maximized;
+                                    state.window.set_maximized(maximized);
+                                }
+                                "z" => {
+                                    minimized = !minimized;
+                                    state.window.set_minimized(minimized);
+                                }
+                                "i" => {
+                                    with_min_size = !with_min_size;
+                                    let min_size = if with_min_size {
+                                        Some(PhysicalSize::new(100, 100))
+                                    } else {
+                                        None
+                                    };
+
+                                    state.window.set_min_inner_size(min_size);
+                                    eprintln!(
+                                        "Min: {with_min_size}: {min_size:?} => {:?}",
+                                        state.window.inner_size()
+                                    );
+                                }
+                                "a" => {
+                                    with_max_size = !with_max_size;
+                                    let max_size = if with_max_size {
+                                        Some(PhysicalSize::new(200, 200))
+                                    } else {
+                                        None
+                                    };
+
+                                    state.window.set_max_inner_size(max_size);
+                                    eprintln!(
+                                        "Max: {with_max_size}: {max_size:?} => {:?}",
+                                        state.window.inner_size()
+                                    );
+                                }
+                                _ => (),
+                            },
+                            _ => (),
+                        },
+
                         WindowEvent::RedrawRequested => {
                             state.update();
                             match state.render() {
@@ -179,16 +284,20 @@ pub async fn run() -> Result<(), impl std::error::Error> {
                             }
                             state.window.pre_present_notify();
                         }
+
                         WindowEvent::Resized(physical_size) => {
                             state.resize(*physical_size);
                         }
+
                         _ => (),
                     }
                 }
             }
+
             Event::AboutToWait => {
                 state.window.request_redraw();
             }
+
             _ => (),
         }
     })
