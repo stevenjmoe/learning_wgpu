@@ -15,6 +15,8 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     clear_colour: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
+    render_pipeline2: wgpu::RenderPipeline,
+    use_colour: bool,
     window: Window,
 }
 
@@ -72,6 +74,7 @@ impl State {
 
         let clear_colour = wgpu::Color::BLACK;
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader2 = device.create_shader_module(wgpu::include_wgsl!("challenge_shader.wgsl"));
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -104,7 +107,7 @@ impl State {
                 cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
-                conservative: false,
+                ..Default::default()
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
@@ -115,6 +118,43 @@ impl State {
             multiview: None,
         });
 
+        let render_pipeline2 = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipline 2"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader2,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader2,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+
+        let use_colour = false;
+
         Self {
             window,
             surface,
@@ -124,6 +164,8 @@ impl State {
             size,
             clear_colour,
             render_pipeline,
+            render_pipeline2,
+            use_colour,
         }
     }
 
@@ -151,6 +193,18 @@ impl State {
                     a: 1.0,
                     b: 1.0,
                 };
+                true
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state,
+                        logical_key: Key::Named(NamedKey::Space),
+                        ..
+                    },
+                ..
+            } => {
+                self.use_colour = *state == ElementState::Released;
                 true
             }
             _ => false,
@@ -186,7 +240,12 @@ impl State {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_pipeline(if self.use_colour {
+                &self.render_pipeline
+            } else {
+                &self.render_pipeline2
+            });
+
             render_pass.draw(0..3, 0..1);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
